@@ -1,6 +1,7 @@
 #ifndef __NEWTONSIM__H
 #define __NEWTONSIM__H
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
@@ -43,7 +44,22 @@ class NewtonSim {
     // These have to be pointers because Gem5 will try to push this object
     // into container which will invoke a copy constructor, using pointers
     // here is safe
-    class ResponseQueue;
+    class ResponseQueue {
+      public:
+        ResponseQueue(int Size);
+        bool isAvailable() const;
+        bool isAvailable(uint32_t count) const;
+        bool isEmpty() const;
+        void reserve();
+        void push(void *original_req);
+        void *top() const;
+        void pop();
+
+      private:
+        const uint32_t Size;
+        uint32_t NumReserved;
+        std::vector<void *> OutputQueue;
+    };
     Config *config_;
     BaseDRAMSystem *dram_system_;
     std::vector<ResponseQueue> response_queues_;
@@ -57,22 +73,6 @@ class NewtonSim {
     int outcome_req_cnt_ = 0;
 
     void PushToPendingQueue(uint64_t addr, TransactionType req_type, void *original_req);
-};
-class NewtonSim::ResponseQueue {
-  public:
-    ResponseQueue(int Size);
-    bool isAvailable() const;
-    bool isAvailable(uint32_t count) const;
-    bool isEmpty() const;
-    void reserve();
-    void push(void *original_req);
-    void *top() const;
-    void pop();
-
-  private:
-    const uint32_t Size;
-    uint32_t NumReserved;
-    std::vector<void *> OutputQueue;
 };
 
 } // namespace dramsim3

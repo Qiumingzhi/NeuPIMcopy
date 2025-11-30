@@ -9,6 +9,18 @@ class NeuPIMSAttend : public Operation {
     NeuPIMSAttend(std::string name);
 
     std::vector<Ptr<BTensor>> get_outputs(std::vector<Ptr<BTensor>> inputs) override;
+    //这个函数定义了数据流图（Dataflow Graph）中的一个节点的行为： 
+    // “给我一组输入张量，我根据我的内部逻辑（Attention 机制），告诉你输出张量应该长什么样。”
+    
+
+
+/*
+    std::vector<...> 动态数组（列表）
+    Ptr<...> 智能指针（Smart Pointer） 避免拷贝 自动防泄漏 多态支持
+    BTensor  这是所有张量（Tensor）的基类（父类）
+
+*/
+
 
     uint32_t _batch_size;
     std::vector<Ptr<NPUTensor>> _logits;

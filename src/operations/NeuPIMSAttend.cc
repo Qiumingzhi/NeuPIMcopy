@@ -2,12 +2,19 @@
 
 NeuPIMSAttend::NeuPIMSAttend(std::string name) : Operation(name) {}
 
+
+
+// 只要定义为 std::vector<Ptr<NPUTensor>>（或者 std::vector<Ptr<BTensor>> 等），
+// 它本质上就是一个“存放张量指针的列表”。
+
+
 std::vector<Ptr<BTensor>> NeuPIMSAttend::get_outputs(std::vector<Ptr<BTensor>> inputs) {
     set_as_parent_tensor(inputs);
 
     _inputs = inputs;
 
-    _batch_size = inputs.size() / 2;
+    _batch_size = inputs.size() / 2; // inputs.size() 它是 std::vector 类的一个内置方法。
+    // 由C++定义, 返回的是传入的张量总数 切分为两部分 一部分是logits 另一部分是vs
     uint32_t i = 0;
 
     for (auto tensor : inputs) {
@@ -17,16 +24,20 @@ std::vector<Ptr<BTensor>> NeuPIMSAttend::get_outputs(std::vector<Ptr<BTensor>> i
             _vs.push_back(std::static_pointer_cast<PIMTensor>(tensor));
         }
         i++;
-    }
+    } // 填满logits和vs
 
-    _outputs.resize(_batch_size);
+    _outputs.resize(_batch_size); 
 
-    _nh = _vs[0]->get_dims()[0];
+    _nh = _vs[0]->get_dims()[0]
     _dk = _vs[0]->get_dims()[2];
 
     // assert(inputs.size() == 2);
     for (int i = 0; i < _batch_size; ++i) {
         auto L = _logits[i];  // [h, l, seq_len] // l must be seq_len or 1
+        // l = seq_len：Prefill Phase 我们需要一次性计算输入中所有 Token 的 Attention
+        //  此时 Query 的长度等于输入的长度
+        // l = 1:  Decoding Phase 
+        // 我们只需要计算最新生成的那个 Token 对之前所有 Token 的 Attention。此时 Query 只有一个 Token。
         auto V = _vs[i];      // [h, seq_len, dk]
 
         // spdlog::info("(NeuPIMSAttend) L: {}, V: {}", L->get_dims(), V->get_dims());
@@ -63,6 +74,9 @@ void NeuPIMSAttend::initialize_tiles() {
     }
 }
 
+
+
+// 这段代码的主要作用是为 Attention 操作生成底层的指令序列
 Tile NeuPIMSAttend::initialize_instructions(int start, int end) {
     auto tile = Tile{
         .status = Tile::Status::INITIALIZED,
@@ -71,18 +85,18 @@ Tile NeuPIMSAttend::initialize_instructions(int start, int end) {
         .batch = 0,
         .K = 0,
         .accum = false,
-    };
+    };// 初始化一个 Tile 对象用于存放指令
 
-    for (int i = start; i < end + 1; ++i) {
-        auto logit = _logits[i];
-        auto value = _vs[i];
+    for (int i = start; i < end + 1; ++i) { // 遍历 Batch
+        auto logit = _logits[i]; // Attention Score (Query * Key 的结果)
+        auto value = _vs[i];  // Value 矩阵
 
-        uint32_t seq_len = value->get_dims()[1];
-        uint32_t ch = value->get_channel();
-        uint32_t chunks = ceil((double)seq_len / _page_size);
+        uint32_t seq_len = value->get_dims()[1]; // Value 矩阵的 seq_len
+        uint32_t ch = value->get_channel(); // Value 矩阵的 channel
+        uint32_t chunks = ceil((double)seq_len / _page_size); // Value 矩阵的 chunk 数
         // spdlog::info("seq_len: {}", seq_len);
 
-        if (logit->get_dims()[1] != 1) {
+        if (logit->get_dims()[1] != 1) { // 如果 logit 的 seq_len 不为 1
             // spdlog::info("logit dim:{}", logit->get_dims());
             // spdlog::info("value dim:{}", value->get_dims());
             assert(logit->get_dims()[1] == seq_len);
@@ -278,13 +292,13 @@ void NeuPIMSAttend::calculate_loops() {
     _page_size = _config.dram_page_size / _config.precision;
     _banks_per_channel = _config.dram_banks_per_ch;
 
-    _tiles_per_chunk = ceil((double)_dk / _banks_per_channel);
-    _datas_per_comp_cmd = _config.pim_comp_coverage;
+    _tiles_per_chunk = ceil((double)_dk / _banks_per_channel);  // 不是很懂
+    _datas_per_comp_cmd = _config.pim_comp_coverage;  //一次可以比较16个
 
     // npu tiling
-    int heads_per_dram_page = floor((double)_page_size / _dk);
-    int heads_space_in_page = heads_per_dram_page * _dk;
-    int chunks = ceil((double)E / heads_space_in_page);
+    int heads_per_dram_page = floor((double)_page_size / _dk);   // 512/128=4 一个page 能放4个头
+    int heads_space_in_page = heads_per_dram_page * _dk;  // 4*128=512
+    int chunks = ceil((double)E / heads_space_in_page);  // E = 1024 chunks=1024/512=2 需要2个page
 
     int sram_needs = 0;
     for (int i = 0; i < _batch_size; ++i) {
@@ -297,8 +311,9 @@ void NeuPIMSAttend::calculate_loops() {
         int need_sram_for_req = 0;
 
         if (q_len == 1) {
-            // incremental phase
-            need_sram_for_req = (seq_len + chunks * _dk) * _nh * _config.precision;
+            // incremental phase 解码阶段
+            need_sram_for_req = (seq_len + chunks * _dk) * _nh * _config.precision; 
+            // (seq_len + 2*128) + 16*4 
             sram_needs += need_sram_for_req;
         } else {
             // initiation phase

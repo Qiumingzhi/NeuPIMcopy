@@ -98,23 +98,24 @@ class ModelConfig:
 
 def num_tiles_per_channel():
     # precision 
-    model_params_per_ch_b = GB2B(ModelConfig.num_params / ModelConfig.n_pp * 2) // ModelConfig.n_tp
-    available_kv_b = GB2B(MemoryConfig.num_channels) - model_params_per_ch_b
+    model_params_per_ch_b = GB2B(ModelConfig.num_params / ModelConfig.n_pp * 2) // ModelConfig.n_tp # 模型权重总大小
+    available_kv_b = GB2B(MemoryConfig.num_channels) - model_params_per_ch_b # 代码隐含假设 1 Channel = 1 GB
     available_tiles = ceil(available_kv_b, MemoryConfig.pim_tile_size_b)
     return available_tiles // MemoryConfig.num_channels
+    # 除去模型权重后，每一个Channel里还剩下可以存放 29,184 个 Tile 的空间用来做 KV Cache。
 
 
 class Request:
     def __init__(self, input_tok, output_tok):
-        self.input_tok = input_tok
-        self.output_tok = output_tok
-        self.generated_tok = 0
+        self.input_tok = input_tok  # 提示词（Prompt）长度 
+        self.output_tok = output_tok  # 需要生成的 Token 数量
+        self.generated_tok = 0    # 当前已经生成了多少个
 
-        self.is_allocated = False
-        self.channel = 0
+        self.is_allocated = False # 是否已经被分配到了某个内存通道
+        self.channel = 0  # 分配到的通道 ID
     
 
-    def __lt__(self, other):
+    def __lt__(self, other):     # 用于排序：按当前序列长度从小到大排
         return self.get_seq_len() < other.get_seq_len()
 
 
@@ -139,33 +140,79 @@ class Request:
 
     # return unit : tiles
     def tile_used(self):
-        effective_e = ModelConfig.E // ModelConfig.n_tp
+        # 1. 计算单卡上的有效隐藏层维度
+        effective_e = ModelConfig.E // ModelConfig.n_tp 
 
-        key_period = MemoryConfig.dram_banks_per_ch
-        value_period = MemoryConfig.dram_page_size
+        # 2. 定义硬件映射周期（Mapping Period）
+        # 这是 NeuPIM 特有的映射逻辑：
+        # K 矩阵倾向于利用 Bank 并行度 (banks_per_ch)
+        # V 矩阵倾向于利用 Page 大小 (page_size)
+        key_period = MemoryConfig.dram_banks_per_ch  # 32
+        value_period = MemoryConfig.dram_page_size     # 512
 
+        # 3. 计算需要的 Page 数量 (行数)
+        # ceil(seq_len, period) 意味着数据被切分成了多少块
         key_pages = ceil(self.get_seq_len(), key_period)
         value_pages = ceil(self.get_seq_len(), value_period)
 
+        # 4. 计算需要的 Tile 数量
+        # Key 矩阵大小: (Seq_Len, Hidden_Dim)
+        # Value 矩阵大小: (Seq_Len, Hidden_Dim)
+        # 由于特殊的物理映射，计算 Tile 数时，维度是交叉相乘的：
         key_tiles = key_pages * ceil(effective_e, value_period)
         value_tiles = value_pages * ceil(effective_e, key_period)
-
         #print(self.get_seq_len(), key_tiles, value_tiles)
 
+        # 5. 汇总所有层
+        # (K的块数 + V的块数) * 本设备的层数
         return (key_tiles + value_tiles) * ModelConfig.nl // ModelConfig.n_pp
-       
+        '''
+        为什么 K 和 V 的计算公式看起来是反的？
+        为了让 PIM 的 GEMV（矩阵乘向量）效率最高，K 和 V 在物理内存中通常采用了 转置存储 或 不同的交错映射。
+        结果：返回该请求当前时刻占用的物理 Tile 总数。如果这个数超过了 Channel 剩余的 Tile，就会发生 OOM（显存溢出）。
+        '''
+
 
     def estimate_latency(self):
+        # 1. 计算单卡上的有效隐藏层维度 4096/4=1024
         effective_e = ModelConfig.E / ModelConfig.n_tp
         latency = 0
 
+        # --- 第一阶段：计算 Attention Score (Q * K^T) ---
+        # 矩阵形状：[1, E] * [E, SeqLen] -> [1, SeqLen]
+        
+        # 1. chunks: 实际上对应 Hidden Dimension 方向上的切分
+        # 1024/512=2 一个token 需要2个位置 
         chunks = math.ceil(effective_e / MemoryConfig.dram_page_size)
+        
+        # 2. tiles: 对应 Sequence Length 方向上的切分
+        # x/32
         tiles = math.ceil(self.get_seq_len() / MemoryConfig.dram_banks_per_ch)
-        latency += chunks * MemoryConfig.gwrite_latency
+        # tiles决定了为了覆盖整个序列长度，硬件需要循环执行多少次并行的 GEMV 操作。
+
+
+        # 3. 累加延迟
+        # gwrite_latency: 全局写入/同步开销
+        # gemv_latency: PIM 核心进行一次矩阵向量乘法的开销
+        latency += chunks * MemoryConfig.gwrite_latency # 只包括了Q的写入 没包括K的写入
         latency += chunks * tiles * MemoryConfig.gemv_latency
 
-        chunks = math.ceil(self.get_seq_len() / MemoryConfig.dram_page_size) * ModelConfig.nh
+
+        # --- 第二阶段：计算 Attention Output (Score * V) ---
+        # 矩阵形状：[1, SeqLen] * [SeqLen, E] -> [1, E]
+        
+        # 1. chunks: 对应 Sequence Length 方向上的切分
+        # 注意这里乘了 nh (num_heads)，因为多头注意力要分别计算再拼接
+        chunks = math.ceil(self.get_seq_len() / MemoryConfig.dram_page_size) * (ModelConfig.nh // ModelConfig.n_tp)
+        
+        # nh = 32个头 既然是张量并行 那么就应该切分注意力头
+
+        # 2. tiles: 对应 Head Dimension (dk) 方向上的切分
         tiles = math.ceil(ModelConfig.dk / MemoryConfig.dram_banks_per_ch)
+        # dk=4096/32=128 128/32=4  dk 是单个注意力头的维度大小，它不应该被张量并行切分。
+
+
+        # 3. 累加延迟
         latency += chunks * MemoryConfig.gwrite_latency
         latency += chunks * tiles * MemoryConfig.gemv_latency
 
