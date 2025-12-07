@@ -1,0 +1,9 @@
+CompileFlags:
+  # 移除 clang 不认识的参数，解决红色报错
+  Remove:
+    - --debug-cpp
+    - --trace
+    - -fno-lifetime-dse # 如果有其他 gcc 专用 flag 也可以加在这里
+
+  # 如果你不想看那些黄色的警告，可以把下面这行解开注释
+  # Add: [-Wno-reorder, -Wno-sign-compare]

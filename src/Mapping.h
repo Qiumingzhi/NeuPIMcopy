@@ -13,7 +13,7 @@ struct Mapping {
         uint32_t M = 1; // Number of output channles
         uint32_t S = 1; // Weight height
         uint32_t R = 1; // Weight width
-        uint32_t Q = 1; // INput height
+        uint32_t Q = 1; // Input height
         uint32_t P = 1; // Input width
         bool operator==(const LoopCounts &other) const {
             return (N == other.N) && (C == other.C) && (M == other.M) && (S == other.S) &&

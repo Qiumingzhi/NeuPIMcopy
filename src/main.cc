@@ -1,4 +1,5 @@
 #include "Simulator.h"
+#include "Common.h"
 #include "allocator/AddressAllocator.h"
 #include "helper/CommandLineParser.h"
 #include "operations/Operation.h"
@@ -65,18 +66,37 @@ int main(int argc, char **argv) {
     initialize_memory_config(mem_config_path);
     initialize_client_config(cli_config_path);
     initialize_model_config(model_config_path);
-    initialize_system_config(sys_config_path);
+    initialize_system_config(sys_config_path); //这几个函数都定义在Common.h中
 
-    Config::global_config.log_dir = log_dir_path;
+    Config::global_config.log_dir = log_dir_path; // Config 在项目中是一个命名空间 在src/SimulationConfig.h
+ 
 
     Operation::initialize(Config::global_config);
 
     auto simulator = std::make_unique<Simulator>(Config::global_config);
     AddressConfig::alignment = Config::global_config.dram_req_size;
+    //alignment (对齐大小)：设置为 DRAM 的请求粒度（通常是 64 字节）。
+    //作用：模拟器在分配地址时，会保证每个数据块的起始地址都是 64 的倍数，模拟真实的内存对齐要求。
+
     // todo: assert log2
     AddressConfig::channel_mask = Config::global_config.dram_channels - 1;
+    //channel_mask (通道掩码)：设置为 DRAM 的通道数减 1。
+    //作用：用于快速计算地址的通道部分，通过位掩码操作实现。
+    //原理：如果通道数是 2 的幂（比如 16），那么 16 - 1 = 15 (二进制 00001111)。
+    //用法：channel_id = address & channel_mask。这是一种比取模运算 (%) 快得多的位运算技巧。
+
     // todo: magic number
     AddressConfig::channel_offset = 10;  // 64B req_size -> 6bit + 16 groups of columns -> 4bit
+    //channel_offset (通道偏移量)：决定了地址中的哪几位用来表示通道 ID。
+    //解释：
+    // 10 表示从第 10 位开始看通道 ID。
+    // 低 6 位（0-5）：64B req_size -> 用于表示 64 字节内的偏移。
+    // 中间 4 位（6-9）：16 groups of columns -> 用于列地址的一部分。
+    // 第 10 位开始：才是通道选择位。
+    // 目的：这定义了地址交错 (Interleaving) 的粒度。这里采用了“细粒度交错”，使得相邻的数据块分布在不同的通道上，以最大化并行度。
+    
+    
+    
     spdlog::info("DRAM address alignment {}", AddressConfig::alignment);
 
     std::string model_name = Config::global_config.model_name;

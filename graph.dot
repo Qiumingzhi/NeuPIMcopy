@@ -1,0 +1,38 @@
+digraph ComputationGraph {
+    rankdir=LR;
+    node [shape=box, style=filled, color=lightblue];
+    op_39 [label="layer0.ffn.gelu\nlayer0.ffn.gelu"];
+    op_39 -> op_41;
+    op_29 [label="layer0.attn.BConcat\nlayer0.attn.BConcat"];
+    op_29 -> op_31;
+    op_31 [label="layer0.attn.proj\nlayer0.attn.proj"];
+    op_31 -> op_33;
+    op_33 [label="layer0.attn.res\nlayer0.attn.res"];
+    op_33 -> op_35;
+    op_33 -> op_43;
+    op_35 [label="layer0.ffn.ln\nlayer0.ffn.ln"];
+    op_35 -> op_37;
+    op_43 [label="layer0.ffn.res\nlayer0.ffn.res"];
+    op_15 [label="layer0.attn.ln\nlayer0.attn.ln"];
+    op_15 -> op_17;
+    op_21 [label="layer0.attn.QKVsplit.0\nlayer0.attn.QKVsplit.0"];
+    op_21 -> op_23;
+    op_21 -> op_23;
+    op_21 -> op_25;
+    op_19 [label="layer0.attn.BSplit\nlayer0.attn.BSplit"];
+    op_19 -> op_21;
+    op_25 [label="layer0.attn.attn.NeuPIMSAttend\nlayer0.attn.attn.NeuPIMSAttend"];
+    op_25 -> op_27;
+    op_41 [label="layer0.ffn.fc2\nlayer0.ffn.fc2"];
+    op_41 -> op_43;
+    op_27 [label="layer0.attn.Areshape.0\nlayer0.attn.Areshape.0"];
+    op_27 -> op_29;
+    op_37 [label="layer0.ffn.fc1\nlayer0.ffn.fc1"];
+    op_37 -> op_39;
+    op_17 [label="layer0.attn.QKVgen\nlayer0.attn.QKVgen"];
+    op_17 -> op_19;
+    op_23 [label="layer0.attn.attn.NeuPIMSLogitSoftmax\nlayer0.attn.attn.NeuPIMSLogitSoftmax"];
+    op_23 -> op_25;
+    tensor_0 [label="0.KEY.0\n(Input Tensor)", shape=ellipse, color=lightgrey];
+    tensor_0 -> op_23;
+}

@@ -11,7 +11,7 @@ LICENSE file in the root directory of this source tree.
 
 namespace po = boost::program_options;
 
-class CommandLineParser {
+class CommandLineParser { //创建一个用于命令行解析的解析类
   public:
     using ParsingError = po::error;
 

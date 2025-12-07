@@ -24,7 +24,7 @@ Simulator::Simulator(SimulationConfig config) : _config(config), _core_cycles(0)
         fs::path(__FILE__).parent_path().append(config.pim_config_path).string();
     spdlog::info("Newton config: {}", pim_config);
     config.pim_config_path = pim_config;
-    _dram = std::make_unique<PIM>(config);
+    _dram = std::make_unique<PIM>(config); //_dram 是一个 PIM类型的指针。也即DRAM类型的
 
     // Create interconnect object
     _icnt = std::make_unique<SimpleInterconnect>(config);
@@ -33,18 +33,20 @@ Simulator::Simulator(SimulationConfig config) : _config(config), _core_cycles(0)
     //     _icnt = std::make_unique<Booksim2Interconnect>(config);
     // } else {
     //     assert(0);
-    // }
+    // }    // 目前的模拟器只支持简单的互连网络模型，虽然代码里留有 BookSim2 ，但注释掉了
+
+
 
     // Create core objects
     _cores.resize(config.num_cores);
-    _n_cores = config.num_cores;
-    _n_memories = config.dram_channels;
+    _n_cores = config.num_cores; // 只有1个核
+    _n_memories = config.dram_channels; //32通道
     for (int core_index = 0; core_index < _n_cores; core_index++) {
         spdlog::info("initializing NeuPIM SystolicWS cores.");
         _cores[core_index] = std::make_unique<NeuPIMSystolicWS>(core_index, _config);
     }
 
-    if (config.scheduler_type == "simple") {
+    if (config.scheduler_type == "simple") { //使用的是这个
         _scheduler = std::make_unique<OrcaScheduler>(_config, &_core_cycles);
     } else if (config.scheduler_type == "neupims") {
         _scheduler = std::make_unique<NeuPIMScheduler>(_config, &_core_cycles);
@@ -54,7 +56,7 @@ Simulator::Simulator(SimulationConfig config) : _config(config), _core_cycles(0)
     //     _scheduler = std::make_unique<TimeMultiplexScheduler>(_config, &_core_cycles);
     // } else if (config.scheduler_type == "spatial_split") {
     //     _scheduler = std::make_unique<HalfSplitScheduler>(_config, &_core_cycles);
-    // }
+    // } 
 
     _client = std::make_unique<Client>(_config);
 }
@@ -118,26 +120,34 @@ void Simulator::cycle() {
         int model_id = 0;
 
         set_cycle_mask();
+
+
+        // 一个巨大的 while 循环，只要还有任务没做完（running()为真），它就一直转。
+        // 这个函数通过不断地轮询这三个部分，模拟了数据在 CPU（计算） <-> 总线（运输） <-> 内存（存储） 之间的完整流动过程。
+
+
+
         // Core Cycle
-        if (_cycle_mask & CORE_MASK) {
-            while (_client->has_request()) {  // FIXME: change while to if
+        if (_cycle_mask & CORE_MASK) { //这部分模拟 NPU 核心的行为：
+            while (_client->has_request()) {  // 接请求
                 std::shared_ptr<InferRequest> infer_request = _client->pop_request();
                 _scheduler->add_request(infer_request);
             }
-            _client->cycle();
+            _client->cycle(); //处理请求
 
-            while (_scheduler->has_completed_request()) {
+            while (_scheduler->has_completed_request()) { //完成请求
                 std::shared_ptr<InferRequest> response = _scheduler->pop_completed_request();
                 _client->receive_response(response);
             }
 
-            if (_scheduler->has_stage_changed()) {
+            if (_scheduler->has_stage_changed()) { //调度器判断stage变化了吗
                 _scheduler->reset_has_stage_changed_status();
                 // _icnt->log(_scheduler->get_prev_stage());
                 update_stage_stat();
             }
-            _scheduler->cycle();
+            _scheduler->cycle(); //调度器执行
 
+            // 3. 回收完成的任务 (Finish Tile)
             for (int core_id = 0; core_id < _n_cores; core_id++) {
                 auto finished_tile = _cores[core_id]->pop_finished_tile();
                 if (finished_tile == nullptr) {
@@ -145,10 +155,14 @@ void Simulator::cycle() {
                     _scheduler->finish_tile(core_id, *finished_tile);
                 }
 
+
+
+                // 4. 发射新任务 (Issue New Tile) - 最核心的部分 这里体现了 NeuPIMs 的 双发射/双流水线 设计：
                 // Issue new tile to core
                 if (_scheduler->empty1() && _scheduler->empty2()) continue;
 
                 // >>> todo: support 2 sub-batch
+                // 流水线 1 (SA - Systolic Array)：
                 if (!_scheduler->empty1()) {
                     Tile &tile = _scheduler->top_tile1(core_id);
                     if ((tile.status != Tile::Status::EMPTY) && _cores[core_id]->can_issue(tile)) {
@@ -159,6 +173,7 @@ void Simulator::cycle() {
                         }
                     }
                 }
+                // 流水线 2 (PIM - Processing-in-Memory)：
                 if (!_scheduler->empty2()) {
                     Tile &tile = _scheduler->top_tile2(core_id);
                     if ((tile.status != Tile::Status::EMPTY) && _cores[core_id]->can_issue_pim()) {
@@ -168,19 +183,37 @@ void Simulator::cycle() {
                             _scheduler->get_tile2(core_id);
                         }
                     }
-                }
+                } // 包括了core, scheduler这两个类
                 // <<< todo: support 2 sub-batch
                 _cores[core_id]->cycle();
             }
             _core_cycles++;
         }
 
+
+
+
         // DRAM cycle
-        if (_cycle_mask & DRAM_MASK) {
-            _dram->cycle();
+        if (_cycle_mask & DRAM_MASK) { // 内存周期 (DRAM Cycle) 
+            _dram->cycle();     //_dram 是一个 Dram类型的指针。在27行定义 std::unique_ptr<Dram> _dram;
         }
+        // 这部分很简单，直接调用 _dram->cycle()。
+        // DRAM 控制器会检查自己的请求队列，处理读写命令，更新 Bank 的状态（激活、预充电等），并把数据准备好。
+
+
+
+
         // Interconnect cycle
-        if (_cycle_mask & ICNT_MASK) {
+        /*
+            这部分模拟了数据在各个组件之间的流动（快递运输）：
+            Core -> ICNT：核心把要读/写内存的请求（MemoryRequest）扔进互连网络。
+            注意这里有 request1 (普通数据) 和 request2 (PIM数据) 的区分，体现了双发射或双通道的设计。
+            ICNT -> Core：互连网络把内存返回的数据（Response）送回给核心。
+            ICNT -> DRAM：互连网络把核心的请求送到 DRAM 门口。
+            DRAM -> ICNT：DRAM 把读到的数据扔进互连网络，准备运回核心。
+            最后调用 _icnt->cycle()，让网络里的数据包往前挪一步。
+        */
+        if (_cycle_mask & ICNT_MASK) { 
             for (int core_id = 0; core_id < _n_cores; core_id++) {
                 for (uint32_t channel_index = 0; channel_index < _n_memories; ++channel_index) {
                     auto core_ind = core_id * _n_cores + channel_index;

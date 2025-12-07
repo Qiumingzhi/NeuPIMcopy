@@ -46,8 +46,7 @@
 #define ADDR_ALIGN 256
 
 using json = nlohmann::json;
-template <typename T>
-using Ptr = std::shared_ptr<T>;
+template <typename T> using Ptr = std::shared_ptr<T>;
 
 typedef uint64_t addr_type;
 typedef uint64_t cycle_type;
@@ -61,200 +60,228 @@ uint32_t mask_channel(addr_type address);
 addr_type allocate_address(uint32_t size);
 addr_type align(addr_type addr);
 
-uint64_t make_address(int channel, int rank, int bankgroup, int bank, int row, int col);
-uint64_t encode_pim_header(int channel, int row, bool for_gwrite, int num_comps, int num_readres);
-uint64_t encode_pim_comps_readres(int ch, int row, int num_comps, bool last_cmd);
+uint64_t make_address(int channel, int rank, int bankgroup, int bank, int row,
+                      int col);
+uint64_t encode_pim_header(int channel, int row, bool for_gwrite, int num_comps,
+                           int num_readres);
+uint64_t encode_pim_comps_readres(int ch, int row, int num_comps,
+                                  bool last_cmd);
 
 addr_type switch_co_ch(addr_type addr);
-}  // namespace AddressConfig
+} // namespace AddressConfig
 
 enum class Color { RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, DEFAULT };
 
 enum class Opcode {
-    MOVIN,
-    MOVOUT,
-    MOVOUT_POOL,
-    GEMM_PRELOAD,
-    GEMM,
-    GEMM_WRITE,
-    COMP,
-    IM2COL,
-    LAYERNORM,
-    GELU,
-    SOFTMAX,
-    ADD,
-    BAR,
-    PIM_HEADER,
-    PIM_GWRITE,
-    PIM_COMP,
-    PIM_READRES,
-    PIM_COMPS_READRES,
-    DUMMY,
-    SIZE
+  MOVIN,
+  MOVOUT,
+  MOVOUT_POOL,
+  GEMM_PRELOAD,
+  GEMM,
+  GEMM_WRITE,
+  COMP,
+  IM2COL,
+  LAYERNORM,
+  GELU,
+  SOFTMAX,
+  ADD,
+  BAR,
+  PIM_HEADER,
+  PIM_GWRITE,
+  PIM_COMP,
+  PIM_READRES,
+  PIM_COMPS_READRES,
+  DUMMY,
+  SIZE
 };
 
 struct Tile;
 
 struct Instruction {
-    Opcode opcode;
-    cycle_type start_cycle;
-    cycle_type finish_cycle;
-    std::string id;
-    std::vector<std::string> dependent_ids;
-    std::string dest_id;
-    addr_type dest_addr;
-    uint32_t size;
-    std::vector<addr_type> src_addrs;
-    int spad_id;
-    int accum_spad_id;
-    uint32_t operand_id = 0;
-    addr_type base_addr;
+  Opcode opcode;
+  cycle_type start_cycle;
+  cycle_type finish_cycle;
+  std::string id;
+  std::vector<std::string> dependent_ids;
+  std::string dest_id;
+  addr_type dest_addr;
+  uint32_t size;
+  std::vector<addr_type> src_addrs;
+  int spad_id;
+  int accum_spad_id;
+  uint32_t operand_id = 0;
+  addr_type base_addr;
 
-    // for load store instruction operations
-    uint32_t tensor_id;
+  // for load store instruction operations
+  uint32_t tensor_id;
 
-    // for matrix multiplication systolic array utilization
-    uint32_t tile_m;
-    uint32_t tile_k;
-    uint32_t tile_n;
+  // for matrix multiplication systolic array utilization
+  uint32_t tile_m;
+  uint32_t tile_k;
+  uint32_t tile_n;
 
-    bool src_from_accum = false;
-    bool valid = true;
+  bool src_from_accum = false;
+  bool valid = true;
 
-    bool is_pim_inst = false;
+  bool is_pim_inst = false;
 
-    std::weak_ptr<Tile> parent_tile;
+  std::weak_ptr<Tile> parent_tile;
 
-    std::string repr();
+  std::string repr();
 };
 
 enum class StagePlatform;
 
-struct Tile {
-    enum class Status {
-        INITIALIZED,
-        RUNNING,
-        FINISH,
-        BAR,
-        EMPTY,
-    };
-    Status status = Status::EMPTY;
-    std::string optype;
-    uint32_t operation_id;
-    uint32_t batch;
-    uint32_t Q;
-    uint32_t P;
-    uint32_t C;
-    uint32_t S;
-    uint32_t R;
+struct Tile { //这个是NPU里面的基本调度和执行单元
+  enum class Status {
+    INITIALIZED,
+    RUNNING,
+    FINISH,
+    BAR,
+    EMPTY,
+  };
+  Status status = Status::EMPTY;
+  std::string optype;
+  uint32_t operation_id;
+  uint32_t batch;
+  uint32_t Q;
+  uint32_t P;
+  uint32_t C;
+  uint32_t S;
+  uint32_t R; //这几个是卷积参数
 
-    // assume several matmuls
-    std::vector<uint32_t> batches;
-    // assume N,K @ K,M
-    uint32_t N;
-    uint32_t K;
-    uint32_t M;
+  // assume several matmuls
+  std::vector<uint32_t> batches;
+  // assume N,K @ K,M
+  uint32_t N;
+  uint32_t K;
+  uint32_t M; //这几个是GEMM参数
 
-    TileStat stat;
-    std::deque<Instruction> instructions;
-    bool accum;
-    bool skip;
-    int spad_id;
-    int accum_spad_id;
+  TileStat stat;
+  std::deque<Instruction> instructions; //这个 Tile 包含的具体指令序列
+  bool accum;                           //是否需要累加 (如果为
+              // true，说明这是大矩阵切分后的中间块，结果需要累加到之前的
+              // Partial Sum 上)
+  bool skip; //是否跳过 (用于稀疏计算或无效块)
 
-    // initialized when Tile moves into core.
+  // 5. 硬件资源映射 (Resource Mapping)
+  int spad_id;       // 输入缓冲区 ID (用于双缓冲 Ping-Pong)
+  int accum_spad_id; // 累加缓冲区 ID
 
-    // count up when MOVIN op exists,
-    // populate accurate memory request when load instruction is decoded
-    uint32_t remaining_loads;
-    // computation instruction count
-    uint32_t remaining_computes;
-    // count up when MOVOUT op exists,
-    // count up for the compute instruction
-    // populate accurate memory request when store instruction is decoded
-    uint32_t remaining_accum_io;
-    StagePlatform stage_platform;  // SA program / PIM program (for sub-batch interleaving)
-    std::string repr();
+  // initialized when Tile moves into core.
+
+  // count up when MOVIN op exists,
+  // populate accurate memory request when load instruction is decoded
+  uint32_t
+      remaining_loads; // 还有多少个加载指令没完成？(等待数据从 DRAM -> SRAM)
+  // computation instruction count
+  uint32_t remaining_computes; // 还有多少个计算指令没完成？(等待 Systolic Array
+                               // 计算)
+  // count up when MOVOUT op exists,
+  // count up for the compute instruction
+  // populate accurate memory request when store instruction is decoded
+  uint32_t remaining_accum_io; // 还有多少个累加/写回指令没完成？(等待 SRAM ->
+                               // DRAM 或 累加器操作)
+  // 只有当这三个计数器都归零时，这个Tile才算真正执行完毕。
+
+  // 平台标识 (Platform)
+  // SA (脉动阵列) 还是 PIM (存内计算)
+  StagePlatform
+      stage_platform; // SA program / PIM program (for sub-batch interleaving)
+  // 这是一个关键字段，用于支持 NeuPIMs
+  // 的混合执行模型。它标记了这个任务包是应该发送给 NPU 的脉动阵列（Systolic
+  // Array）执行，还是发送给 PIM 单元执行。 这也对应了
+  // Simulator.cc中看到的双发射队列逻辑。
+  std::string repr(); // 定义在Common.cc里面 用于打印Tile信息
 };
 
-enum class MemoryAccessType { READ, WRITE, GWRITE, COMP, READRES, P_HEADER, COMPS_READRES, SIZE };
+enum class MemoryAccessType {
+  READ,
+  WRITE,
+  GWRITE,
+  COMP,
+  READRES,
+  P_HEADER,
+  COMPS_READRES,
+  SIZE
+};
 
 std::string memAccessTypeString(MemoryAccessType type);
 std::string opcodeTypeString(Opcode opcode);
 
 typedef struct MemoryAccess {
-    static int req_count;
-    static int pre_req_count;
+  static int req_count;
+  static int pre_req_count;
 
-    uint32_t id;
-    addr_type dram_address;
-    addr_type spad_address;
-    uint64_t size;
-    MemoryAccessType req_type;
-    bool request;
-    uint32_t core_id;
-    cycle_type start_cycle;
-    cycle_type dram_enter_cycle;
-    cycle_type dram_finish_cycle;
-    int buffer_id;
+  uint32_t id;
+  addr_type dram_address;
+  addr_type spad_address;
+  uint64_t size;
+  MemoryAccessType req_type;
+  bool request;
+  uint32_t core_id;
+  cycle_type start_cycle;
+  cycle_type dram_enter_cycle;
+  cycle_type dram_finish_cycle;
+  int buffer_id;
 
-    static std::vector<MemoryAccess *> from_instruction(Instruction &inst, uint32_t id,
-                                                        uint32_t size, MemoryAccessType req_type,
-                                                        bool request, uint32_t core_id,
-                                                        cycle_type start_cycle, int buffer_id,
-                                                        StagePlatform stage_platform);
+  static std::vector<MemoryAccess *>
+  from_instruction(Instruction &inst, uint32_t id, uint32_t size,
+                   MemoryAccessType req_type, bool request, uint32_t core_id,
+                   cycle_type start_cycle, int buffer_id,
+                   StagePlatform stage_platform);
 
-    std::weak_ptr<Tile> parent_tile;
-    // SA program / PIM program (for sub-batch interleaving)
-    StagePlatform stage_platform;
+  std::weak_ptr<Tile> parent_tile;
+  // SA program / PIM program (for sub-batch interleaving)
+  StagePlatform stage_platform;
 
-    static void log_count() {
-        spdlog::info("total pre req count {} / memory request count {}", pre_req_count, req_count);
-    }
+  static void log_count() {
+    spdlog::info("total pre req count {} / memory request count {}",
+                 pre_req_count, req_count);
+  }
 
 } MemoryAccess;
 
 uint32_t generate_id();
 uint32_t generate_mem_access_id();
 json load_config(std::string config_path);
-SimulationConfig initialize_config(json config);  // npu config
+SimulationConfig initialize_config(json config); // npu config
 void initialize_memory_config(std::string mem_config_path);
 void initialize_client_config(std::string cli_config_path);
 void initialize_model_config(std::string model_config_path);
 void initialize_system_config(std::string sys_config_path);
 
 std::string to_hex(uint32_t input);
-template <typename... Args>
-std::string name_gen(Args... args) {
-    std::vector<std::string> strs = {args...};
-    assert(!strs.empty());
-    std::string ret = "";
-    for (auto &str : strs) {
-        ret += str + ".";
-    }
-    ret.resize(ret.size() - 1);
-    return ret;
+template <typename... Args> std::string name_gen(Args... args) {
+  std::vector<std::string> strs = {args...};
+  assert(!strs.empty());
+  std::string ret = "";
+  for (auto &str : strs) {
+    ret += str + ".";
+  }
+  ret.resize(ret.size() - 1);
+  return ret;
 }
 
 class BTensor;
 typedef struct {
-    // client to scheduler.
-    uint32_t id;
-    uint32_t arrival_cycle;    // time spend on client == arrival time to scheduler
-    uint32_t completed_cycle;  // return time to client
+  // client to scheduler.
+  uint32_t id;
+  uint32_t arrival_cycle;   // time spend on client == arrival time to scheduler
+  uint32_t completed_cycle; // return time to client
 
-    // request demand
-    uint32_t input_size;   // input sequence length
-    uint32_t output_size;  // # tokens to generate
+  // request demand
+  uint32_t input_size;  // input sequence length
+  uint32_t output_size; // # tokens to generate
 
-    // request status
-    bool is_initiated;   // whether initialization phase is done
-    uint32_t generated;  // # tokens generated
-    // mapped channel
-    int channel;
+  // request status
+  bool is_initiated;  // whether initialization phase is done
+  uint32_t generated; // # tokens generated
+  // mapped channel
+  int channel;
 
-    std::vector<Ptr<BTensor>> K_cache;
-    std::vector<Ptr<BTensor>> V_cache;
+  std::vector<Ptr<BTensor>> K_cache;
+  std::vector<Ptr<BTensor>> V_cache;
 
 } InferRequest;
 
@@ -262,29 +289,29 @@ void print_backtrace();
 void ast(bool cond);
 template <typename T>
 std::vector<T> slice(std::vector<T> &inp, int start, int end) {
-    if (end <= -1) end = inp.size() + (end + 1); 
-    return std::vector<T>(inp.begin() + start, inp.begin() + end);
+  if (end <= -1)
+    end = inp.size() + (end + 1);
+  return std::vector<T>(inp.begin() + start, inp.begin() + end);
 }
 
-template <typename T>
-class Singleton {
-   protected:
-    static T *instance;
+template <typename T> class Singleton {
+protected:
+  static T *instance;
 
-   public:
-    static T *GetInstance() {
-        if (instance == nullptr) instance = new T();
+public:
+  static T *GetInstance() {
+    if (instance == nullptr)
+      instance = new T();
 
-        return instance;
-    }
-    static void Delete() { delete instance; }
+    return instance;
+  }
+  static void Delete() { delete instance; }
 };
-template <typename T>
-T *Singleton<T>::instance = nullptr;
+template <typename T> T *Singleton<T>::instance = nullptr;
 
-MemoryAccess *TransToMemoryAccess(Instruction &inst, uint32_t size, uint32_t core_id,
-                                  cycle_type start_cycle, int buffer_id,
-                                  StagePlatform stage_platform);
+MemoryAccess *TransToMemoryAccess(Instruction &inst, uint32_t size,
+                                  uint32_t core_id, cycle_type start_cycle,
+                                  int buffer_id, StagePlatform stage_platform);
 
 int LogBase2(int power_of_two);
 

@@ -1,10 +1,10 @@
-cd build; make; cd ..;
+# cd build; make; cd ..;
 
 # config file
 config=./configs/systolic_ws_128x128_dev.json
 mem_config=./configs/memory_configs/neupims.json
 model_config=./configs/model_configs/gpt3-7B.json
-sys_config=./configs/system_configs/sub-batch-off.json
+sys_config=./configs/system_configs/sub-batch-on.json
 cli_config=./request-traces/clb/share-gpt2-bs512-ms7B-tp4-clb-0.csv
 
 # log file
@@ -27,7 +27,7 @@ echo "log directory: $LOG_DIR"
     --cli_config $cli_config \
     --model_config $model_config \
     --sys_config $sys_config \
-    --log_dir $LOG_DIR
+    --log_dir $LOG_DIR | tee ${LOG_DIR}/${LOG_NAME}
 
 
 echo "memory config: $mem_config" > ${CONFIG_FILE}

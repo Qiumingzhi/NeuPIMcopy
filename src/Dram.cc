@@ -50,7 +50,7 @@ void PIM::cycle() {
     if (_cycles % interval == 0) {
         spdlog::debug("-------------DRAM BW Check--------------");
         for (int ch = 0; ch < _config.dram_channels; ch++) {
-            float util = ((float)_processed_requests[ch] * _burst_cycle) / interval * 100;
+            float util = ((float)_processed_requests[ch] * _burst_cycle) / interval * 100; //这里统计带宽利用率
             spdlog::debug("DRAM CH[{}]: BW Util {:.2f}%", ch, util);
             _total_processed_requests[ch] += _processed_requests[ch];
             _processed_requests[ch] = 0;

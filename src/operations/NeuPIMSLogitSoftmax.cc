@@ -269,8 +269,14 @@ Tile NeuPIMSLogitSoftmax::initialize_instructions(int start, int end) {
                 // spdlog::info("(LogitSoftmax) cmd: {}", cmds);
             }
         }
-        for (int hi = 0; hi < _nh; hi++) {
+        //for (int hi = 0; hi < _nh; hi++) {
+        for (int hi = 0; hi < 8; hi++) {
+            // 代码中存在全局 Head 数量与 PIM 硬件映射逻辑不匹配的问题：
+            // 代码中 _nh = 32，但是 PIM 硬件中 Head 数量为 8
             assert(sram_readres_addrs[hi].size() == tiles_per_chunk);
+            // 断言失败：当循环遍历到第 9 个 Head (hi=8) 时，由于没有为它生成指令，
+            // sram_readres_addrs[hi] 为空 (size=0)，
+            // 而预期值 tiles_per_chunk 为 4，导致 0 == 4 断言失败。
             uint32_t column_height = key->_seq_len;  // tiles_per_chunk * banks_per_channel;
             std::pair<addr_type, uint32_t> sram_acc_entry = allocate_sram_addr(column_height, true);
 

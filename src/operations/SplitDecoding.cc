@@ -37,6 +37,10 @@ std::vector<Ptr<BTensor>> SplitDecoding::get_outputs(std::vector<Ptr<BTensor>> i
     // _inputs[2]->add_token();
 
     ast(input->get_dims().back() == 3 * E);
+    // 3 * E 代表 Query、Key 和 Value 三个向量拼接后的总维度。
+    // 这行代码的含义： 它在检查：“输入张量的最后一维大小，是否正好等于 3 倍的嵌入维度？” 
+    // 目的：确保输入数据包含了完整的 Query、Key 和 Value 数据，以便后续将其拆分（Split）成三个独立的张量。
+
     spdlog::info("(SplitDecoding) inputs[0] dimension: {}", _inputs[0]->get_dims()[0]);
 
     uint32_t l = _is_initiated ? 1 : _inputs[0]->get_dims()[0];

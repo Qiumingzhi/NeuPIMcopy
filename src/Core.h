@@ -11,7 +11,7 @@
 
 class Core {
    public:
-    Core(uint32_t id, SimulationConfig config);
+    Core(uint32_t id, SimulationConfig config); 
     virtual bool running();
     virtual bool can_issue(Tile &next_tile);
     virtual void issue(Tile &in_tile);
@@ -42,7 +42,7 @@ class Core {
     const uint32_t _id;
     const SimulationConfig _config;
 
-    cycle_type _core_cycle;
+    cycle_type _core_cycle; //是uint64_t ，typedef uint64_t cycle_type;  位于src/SimulationConfig.h
     uint64_t _compute_end_cycle;
     cycle_type _stat_compute_cycle;
     cycle_type _stat_idle_cycle;

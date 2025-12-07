@@ -63,8 +63,8 @@ bool StageProgram::enable_proj_ffns() {
 }
 
 bool StageProgram::enable_qkv_gen() {
-  return _stage == Stage::A || _stage == Stage::B ||
-         _stage == Stage::D; //在 Stage A, B, D，开启 QKV 生成计算
+  return _stage == Stage::A || _stage == Stage::B || _stage == Stage::C ||
+         _stage == Stage::D; //在 Stage A, B, C, D，开启 QKV 生成计算
 }
 
 void StageProgram::init_SA_program() {
@@ -114,25 +114,13 @@ void StageProgram::init_SA_program() {
   }
 
   if (lets_qkvgen) {
-    // >>> Stage: A/B/D : QKVGen
-    // For Stage B, we might run multiple QKVGens (e.g. #2 and #3)
-    // We must use the current 'inputs' for both, because they are
-    // parallel/independent in this context (representing QKV for different
-    // layers/heads), not sequential.
-    std::vector<Ptr<BTensor>> qkv_inputs = inputs;
-
-    inputs = qkv_gen_block(qkv_inputs);
-
-    if (_stage == Stage::B) {
-      // Run QKVGen again (simulating QKVgen#3 moved from Stage C)
-      qkv_gen_block(qkv_inputs);
-      spdlog::info("SA : QKV generation (Additional Pass for Stage B)");
-    }
+    // >>> Stage: A/B/C/D : QKVGen
+    inputs = qkv_gen_block(inputs);
 
     std::string yellow = "\033[1;33m";
     std::string reset = "\033[0m";
     spdlog::info("{}SA : QKV generation{}", yellow, reset);
-    // <<< Stage:: A/B/D
+    // <<< Stage:: A/B/C/D
   }
 
   find_executable_node(input);

@@ -1,4 +1,4 @@
-{   
+{
     "model_name": "GPT3-7B",
     "model_params_b": 7,
     "model_vocab_size": 50304,
