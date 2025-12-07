@@ -30,31 +30,38 @@ void KVCacheAlloc::init(addr_type base_addr) {
  * 所以特定头的相邻潜在向量（latent vector）应该能被更快地加载。
  */
 void KVCacheAlloc::init_npu_layout(addr_type base_addr) {
-  uint32_t max_active_reqs = Config::global_config.max_active_reqs;
+  uint32_t max_active_reqs =
+      Config::global_config
+          .max_active_reqs; //调度器中 就绪+运行 队列的最大请求数
   uint32_t max_seq_len = Config::global_config.max_seq_len;
   // h: 每个张量并行(TP)分片的头数
   uint32_t h = Config::global_config.model_n_head / Config::global_config.n_tp;
-  // d_k: 每个头的维度大小
+  // d_k: 每个头的维度大小 (128)
   uint32_t d_k =
       Config::global_config.model_n_embd / Config::global_config.model_n_head;
   uint32_t precision = Config::global_config.precision;
 
   _base_addr = base_addr;
-  _kv_cache_entry_size =
-      32; // allocate once per seq_len 32 (每次分配针对32个序列长度)
-  // 计算总的KV Cache大小: max_active_reqs * max_seq_len * h * d_k * precision
-  _kv_cache_size = max_active_reqs * max_seq_len * h * d_k * precision;
+  _kv_cache_entry_size = Config::global_config.dram_banks_per_ch; //这里对吗
+  // 每次分配针对32个序列长度
+
+  // 计算总的KV Cache大小: max_active_reqs * max_seq_len * h * d_k * precision *
+  // 2 (Key + Value)
+  _kv_cache_size = 2 * max_active_reqs * max_seq_len * h * d_k * precision;
+
   // 确保分配的地址空间不超过HBM大小
   ast(_base_addr + _kv_cache_size < Config::global_config.HBM_size);
 
   addr_type next_addr = _base_addr;
   // 每个块存储的序列长度数量 / 每个块的序列长度 (一个块包含 32 * d_k 个元素)
   // = HBM中的KV cache块数量
+  // Multiply by 2 for Key and Value
   uint64_t num_kv_cache_entries =
-      max_active_reqs * max_seq_len * h / _kv_cache_entry_size;
+      2 * max_active_reqs * max_seq_len * h / _kv_cache_entry_size;
 
   // 初始化空闲列表
-  for (int i = 0; i < num_kv_cache_entries; ++i) {
+  for (int i = 0; i < num_kv_cache_entries;
+       ++i) { // _kv_cache是一个双端队列deque
     _kv_cache.push_back(next_addr);
     next_addr += _kv_cache_entry_size * d_k *
                  precision; // 增加地址指针: 32 seq_len * d_k * precision
@@ -63,16 +70,45 @@ void KVCacheAlloc::init_npu_layout(addr_type base_addr) {
 
 void KVCacheAlloc::init_pim_layout(addr_type base_addr) {
   // = DRAM PIM row 中的矩阵行数
-  constexpr uint32_t row_per_bank = 32768;
-  //字节偏移量 X  // rank bit, bg bit, bank bit, ch bit, col bit = 1 + 2 + 2 + 5
-  //+ 10 = 20
+  constexpr uint32_t row_per_bank = 32768; // 32K ， 总共15位
+  // 定义了一个 DRAM Bank 中包含的行数（Rows）
+  // 这是 HBM 或 DDR 内存的标准参数之一。这里硬编码为 32768 (2^15) 行。
+
+  // 字节偏移量 X  // rank bit, bg bit, bank bit, ch bit, col bit =
+  // 1 + 2 + 2 + 5+ 10 = 20
   constexpr uint32_t row_offset = 20;
+
+  // 详细分解（根据注释）:
+  // col bit (10 bits): 列地址。2^10 = 1024 Bytes，也就是所谓的
+  // Row Size / Page Size（行大小）。
+  // ch bit (5 bits): 通道选择。2^5 = 32 Channels。
+  // bank bit (2 bits) + bg bit (2 bits): Bank 选择。
+  // 总共 4 bits，即 16 个 Bank Group （或者更多，取决于具体配置）。
+  // rank bit (1 bit): Rank 选择。
+  // 总和: 10 + 5 + 2 + 2 + 1 = 20 bits。
+
+  // 注意：在模拟器的内存模型中，往往将 Rank、BankGroup、Bank
+  // 扁平化看待。只要地址不同，它们都被视为该 Channel 下的一个独立的“Bank
+  // 资源”单元，因为它们都可以独立通过 ACT 激活行。
+
+  // 再注意：但是这仅是在模拟器的内存层面，在物理层面是不一样的：
+  //作为“容器”： 是的，Rank/BG/Bank 是扁平的，它们都是独立存数据的容器。
+  //作为“资源”： 不是扁平的。
+  //同 Group 的 Bank 是“半独立”的（受 tCCD_L 牵制）。
+  //同 Rank 的 Bank 是“受限独立”的（受 tFAW 牵制）。
+  //同 Channel 的 Rank 是“互斥”的（受数据总线和 tRTRS 牵制）。
+
   constexpr uint64_t mask =
       ~((1 << row_offset) - 1); // 掩码: 0x1111(64-21)0000(21), 用于对齐到行起始
+
+  // 这意味着，一个 64 位的物理地址（Physical Address）被切分为两部分：
+  // 低 20 位： 负责在 DRAM Row 内部定位（选 Rank, Channel, Bank, Column 等）。
+  // 高位（20位以上）： 负责DRAM Row Index（行号）。
+  // 总共35位地址，32GB
   _dram_row_size = Config::global_config.dram_page_size;               // 1024
   _num_ele_per_row = _dram_row_size / Config::global_config.precision; // 512
-  _bank_per_ch = Config::global_config.dram_banks_per_ch;
-  _dram_channels = Config::global_config.dram_channels;
+  _bank_per_ch = Config::global_config.dram_banks_per_ch;              // 32
+  _dram_channels = Config::global_config.dram_channels;                // 32
 
   base_addr = base_addr & mask; // 获取当前地址所在行的起始地址 (去除低位偏移)
   base_addr =

@@ -1,0 +1,16 @@
+
+# Gather all source files
+file(GLOB_RECURSE SOURCES "*.cc")
+file(GLOB_RECURSE HEADERS "*.h")
+
+# Remove main.cc from the library sources to avoid multiple main functions
+list(FILTER SOURCES EXCLUDE REGEX ".*/main.cc$")
+
+# Define the library target
+add_library(Simulator_lib ${SOURCES} ${HEADERS})
+
+# Define the executable target
+add_executable(Simulator main.cc)
+
+# Link the executable to the library
+target_link_libraries(Simulator PRIVATE Simulator_lib)

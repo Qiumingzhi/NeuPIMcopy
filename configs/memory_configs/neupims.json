@@ -8,5 +8,6 @@
     "dram_req_size": 64,
     "dram_page_size": 1024,
     "dram_banks_per_ch": 32,
-    "pim_comp_coverage": 16
+    "pim_comp_coverage": 16,
+    "row_per_bank": 32768
 }
