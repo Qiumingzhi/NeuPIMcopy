@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstdint>
-#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -359,24 +358,23 @@ typedef struct OperationStat {
   }
 
   static std::string get_columns() {
-    std::stringstream ss;
+    std::string ret = "";
     for (auto type : get_stat_types()) {
-      ss << std::setw(20) << enum_to_string(type);
+      ret += enum_to_string(type) + "\t";
     }
-    ss << "\n";
-    return ss.str();
+    return ret + "\n";
   }
 
   std::string repr() {
+    std::string ret = "";
     if (end_cycle == 0) {
-      return "";
+      return ret;
     }
-    std::stringstream ss;
+
     for (auto type : get_stat_types()) {
-      ss << std::setw(20) << get_by_enum(type);
+      ret += get_by_enum(type) + "\t";
     }
-    ss << "\n";
-    return ss.str();
+    return ret + "\n";
   }
 
   std::string op_name;
