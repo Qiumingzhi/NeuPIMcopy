@@ -1,0 +1,67 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Launch Debug Graph",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/qiumingzhi/NeuPIMs/build/bin/debug_graph",
+            "args": [
+                "--config",
+                "/home/qiumingzhi/NeuPIMs/configs/systolic_ws_128x128_dev.json",
+                "--model_config",
+                "/home/qiumingzhi/NeuPIMs/configs/model_configs/gpt3-7B.json",
+                "--mem_config",
+                "/home/qiumingzhi/NeuPIMs/configs/memory_configs/neupims.json",
+                "--sys_config",
+                "/home/qiumingzhi/NeuPIMs/configs/system_configs/sub-batch-off.json"
+            ],
+            "stopAtEntry": false,
+            "cwd": "/home/qiumingzhi/NeuPIMs",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build"
+        },
+        {
+            "name": "(gdb) Launch Simulator",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/qiumingzhi/NeuPIMs/build/bin/Simulator",
+            "args": [
+                "--config",
+                "/home/qiumingzhi/NeuPIMs/configs/systolic_ws_128x128_dev.json",
+                "--mem_config",
+                "/home/qiumingzhi/NeuPIMs/configs/memory_configs/neupims.json",
+                "--cli_config",
+                "/home/qiumingzhi/NeuPIMs/request-traces/clb/share-gpt2-bs512-ms7B-tp4-clb-0.csv",
+                "--model_config",
+                "/home/qiumingzhi/NeuPIMs/configs/model_configs/gpt3-7B.json",
+                "--sys_config",
+                "/home/qiumingzhi/NeuPIMs/configs/system_configs/sub-batch-off.json",
+                "--log_dir",
+                "/home/qiumingzhi/NeuPIMs/experiment_logs/debug_run"
+            ],
+            "stopAtEntry": false,
+            "cwd": "/home/qiumingzhi/NeuPIMs",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build"
+        }
+    ]
+}

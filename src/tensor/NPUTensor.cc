@@ -16,6 +16,24 @@
  *      dimension: 3D (including batch?)
  */
 
+/*举几个dim例子：
+
+标量 (Scalar):  dims = {} (空，或视情况而定)
+
+向量 (1D Tensor): 如果有一个长度为 10 的向量。
+dims就是 [10]。
+dims.size() 是 1（表示它是 1 维的）。
+dims[0] 是 10（表示第 0 维的长度是 10）。
+
+矩阵 (2D Tensor - 比如一张 64x64 的图片):
+dims就是 [64, 64]。
+dims.size() 是 2。
+dims[0] 是 64（高），dims[1] 是 64（宽）。
+
+3D 张量 (比如 Batch 为 2，大小 64x64):
+dims就是 [2, 64, 64]。
+dims.size() 是 3。dims[0]=2, dims[1]=64, dims[2]=64。*/
+
 NPUTensor::NPUTensor(std::string name, std::vector<uint32_t> dims,
                      NPUTensorBufType buf_type, bool produced) {
   ast(buf_type != NPUTensorBufType::KV);
@@ -29,12 +47,26 @@ NPUTensor::NPUTensor(std::string name, std::vector<uint32_t> dims,
   uint32_t num_inners = 1;
   std::vector<uint32_t> inner_dims = dims;
   if (dims.size() == 3) {
-    num_inners = dims[0];
-    inner_dims = slice(dims, 1, -1);
+    num_inners = dims[0]; // 第一维作为拆分数量（Batch 或 Head 数）
+    inner_dims = slice(dims, 1, -1); // 剩余维度作为内层2D张量的维度
   }
   for (int i = 0; i < num_inners; ++i) {
     _inners.push_back(std::make_shared<NPUTensor2D>(inner_dims, buf_type));
   }
+
+  /*处理 3D 张量：
+    如果传入的是 3D 张量（例如 [Batch, M, K] 或 [NumHeads, M, K]），模拟器认为
+    NPU（脉动阵列）一次只能处理 2D 矩阵乘法。
+    因此，它将第一维（dims[0]）剥离出来，视为 num_inners 个独立的 2D 张量。
+    例如：一个 [2, 64, 64] 的张量会被创建为 2 个 [64, 64] 的 NPUTensor2D对象，
+        存放在 _inners 数组中。
+
+    通过_inners[0] _inners[1] 调用这两个2D张量
+
+    处理 2D 张量： 如果传入的是 2D 张量，则 num_inners 保持为 1。
+    _inners 数组中只包含 1 个 NPUTensor2D 对象。
+
+    */
 
   _is_transposed = false;
 }
@@ -104,10 +136,17 @@ std::vector<uint32_t> NPUTensor::get_dims() {
 }
 
 addr_type NPUTensor::get_addr(std::vector<uint32_t> indexes) {
+
+  // 输入：接受一个 indexes 向量，表示要访问的元素的多维坐标。
+
+  // 这个函数目前的实际功能仅仅是作为一个安全检查器：
+  // 它验证索引是否越界，如果在界内则返回0，越界则返回错误码。
+  // 真正复杂的层级化地址计算逻辑被暂时屏蔽了。
+
   // spdlog::info("(NPUTensor::get_addr) indexes:{}, inners.size:{}", indexes,
-  // _inners.size()); spdlog::info("_inners[0]->dims.size:{}",
-  // _inners[0]->_dims.size()); spdlog::info("_inners.size() +
-  // _inners[0]->_dims.size(): {}",
+  //              _inners.size());
+  // spdlog::info("_inners[0]->dims.size:{}", _inners[0]->_dims.size());
+  // spdlog::info("_inners.size() + _inners[0]->_dims.size(): {}",
   //              _inners.size() + _inners[0]->_dims.size());
   // int idx_size = indexes.size();
   // ast(_inners.size() > 0);
@@ -117,10 +156,12 @@ addr_type NPUTensor::get_addr(std::vector<uint32_t> indexes) {
   ast(_dims.size() == indexes.size());
 
   std::vector<uint32_t> dims(_dims.begin(), _dims.end());
-
   if (_is_transposed) {
     std::copy(_dims.rbegin(), _dims.rend(), dims.begin());
   }
+  // 复制维度：创建一个局部变量 dims复制当前的维度信息。
+  // 处理转置：如果 Tensor 被标记为转置（_is_transposed 为 true），
+  // 代码会将维度信息反转。这意味着后续的边界检查是基于转置后的逻辑形状进行的。
 
   for (size_t i = 0; i < dims.size(); ++i) {
     if (indexes[i] >= dims[i]) {

@@ -47,14 +47,29 @@ public:
   virtual std::vector<addr_type> get_all_addrs();
 
   virtual void set_transposed();
+  // 转置支持 (set_transposed)_is_transposed
+  // 标记允许你在逻辑上转置张量，而不需要物理搬运内存。get_dims()会返回反转后的维度。
+  // get_addr()会先反转你传入的索引，再去查物理地址。
+
   virtual void unset_transposed();
+
   virtual void add_token() override; // for KV
+
   std::vector<addr_type> get_row_addrs(uint32_t row_idx);
 
-  std::vector<Ptr<NPUTensor>>
-  split_by_row(std::vector<uint32_t> row_dims); // for 2D
+  std::vector<Ptr<NPUTensor>> split_by_row(std::vector<uint32_t> row_dims);
 
-  std::vector<Ptr<NPUTensorInner>> _inners;
+  std::vector<Ptr<NPUTensorInner>>
+      _inners; // 超过2D张量时，会拆分成多个2D张量_inners
+
+  //高级操作
+  // add_token(): 遍历所有 _inners，让它们各自去扩容（用于 KV Cache）。
+
+  // get_row_addrs(): 获取某一行元素的所有物理地址（优化LayerNorm/Softmax
+  // 等行级操作的访存）。
+
+  // split_by_row():
+  //把一个大张量按行切分成多个小张量（可能用于多核并行或流水线分配）。
 
   bool _is_transposed;
 };

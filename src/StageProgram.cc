@@ -227,9 +227,9 @@ void StageProgram::finish_operation(uint32_t id) {
   _op_map[id]->set_finish();
   for (auto iter = _executable_operations.begin();
        iter != _executable_operations.end(); iter++) {
-    // spdlog::info("iterating operation: {}", (*iter)->get_name());
+    spdlog::info("iterating operation: {}", (*iter)->get_name());
     if (id == (*iter)->get_id()) {
-      // spdlog::info("erasing operation: {}", (*iter)->get_name());
+      spdlog::info("erasing operation: {}", (*iter)->get_name());
       _executable_operations.erase(iter);
       break;
     }

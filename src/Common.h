@@ -34,7 +34,6 @@
 #include "SimulationConfig.h"
 #include "Stat.h"
 #include "helper/HelperFunctions.h"
-#include "nlohmann/json.hpp"
 
 #define SPAD_BASE 0x10000000
 #define ACCUM_SPAD_BASE 0x20000000
